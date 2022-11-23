@@ -19,7 +19,7 @@ jobs:
         arch: [x64, arm64]
         root: [magisk, none]
         gapps: [MindTheGapps, none]
-        release: [retail, RP]
+        release: [retail]
         
     steps:         
       - name: Checkout

@@ -18,6 +18,7 @@ jobs:
       matrix:
         arch: [x64, arm64]
         root: [magisk, none]
+        gapps: [MindTheGapps, none]
         release: [retail, RP]
         
     steps:         
@@ -35,7 +36,7 @@ jobs:
         run: chmod +x ./scripts/build.sh
        
       - name: Build WSA GAPPS ${{ matrix.root }} ${{ matrix.arch }}
-        run:  ./scripts/build.sh --arch ${{ matrix.arch }} --release-type ${{ matrix.release }} --magisk-ver stable --remove-amazon --root-sol ${{ matrix.root }} --compress
+        run:  ./scripts/build.sh --arch ${{ matrix.arch }} --release-type ${{ matrix.release }} --magisk-ver stable --gapps-brand ${{ matrix.gapps }} --remove-amazon --root-sol ${{ matrix.root }} --compress
     
       - name: Prepare release tag
         id: date

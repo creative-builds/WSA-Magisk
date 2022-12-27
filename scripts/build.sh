@@ -93,7 +93,7 @@ abort() {
 trap abort INT TERM
 
 Gen_Rand_Str() {
-    tr -dc '[:lower:]' </dev/urandom | fold -w "$1" | head -n 1
+    haveged -n $((${1:-32}*512)) --file - 2>/dev/null | tr -dc '[:lower:]' | fold -w "$1" | head -n 1
 }
 
 default() {

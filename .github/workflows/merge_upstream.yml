@@ -16,8 +16,9 @@ jobs:
         
       - name: Pull from upstream
         run: |
+          git checkout upstream-($date +%s)
           git config pull.rebase false
-          git pull https://github.com/LSPosed/MagiskOnWSALocal.git main
+          git pull https://github.com/LSPosed/MagiskOnWSALocal.git main --allow-unrelated-histories
         
       - name: Push Changes
         run: git push origin main

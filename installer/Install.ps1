@@ -96,9 +96,38 @@ If (($null -Ne $Installed) -And (-Not ($Installed.IsDevelopmentMode))) {
         exit 1
     }
 }
+
+Stop-Process -Name "WsaClient" -ErrorAction SilentlyContinue
+
+if ((Get-WmiObject -class Win32_OperatingSystem).Caption.Contains("10")) {
+    if ((Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").ReleaseId -eq 2009)
+    {
+        Clear-Host
+        Write-Host "Patching Windows 10 DLL files..."
+        $xml = [xml](Get-Content '.\AppxManifest.xml')
+        $nsm = New-Object Xml.XmlNamespaceManager($xml.NameTable)
+        $nsm.AddNamespace('rescap', "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities")
+        $nsm.AddNamespace('desktop6', "http://schemas.microsoft.com/appx/manifest/desktop/windows10/6")
+        $node = $xml.Package.Capabilities.SelectSingleNode("rescap:Capability[@Name='customInstallActions']", $nsm)
+        $xml.Package.Capabilities.RemoveChild($node) | Out-Null
+        $node = $xml.Package.Extensions.SelectSingleNode("desktop6:Extension[@Category='windows.customInstall']", $nsm)
+        $xml.Package.Extensions.RemoveChild($node) | Out-Null
+        $xml.Package.Dependencies.TargetDeviceFamily.MinVersion = "10.0.19045.2311"
+        $xml.Save(".\AppxManifest.xml")
+        Move-Item –Path .\WsaPatch.dll -Destination .\WsaClient
+        Move-Item –Path .\icu.dll -Destination .\WsaClient
+        Move-Item –Path .\winhttp.dll -Destination .\WsaClient
+    }
+    else {
+    Clear-Host
+    Write-Warning "Your Windows Version is lower than 10.0.19045.2311, please upgrade your Windows to be at least 10.0.19045.2311"
+    $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit 1
+    }
+}
+
 Clear-Host
 Write-Host "Installing MagiskOnWSA..."
-Stop-Process -Name "WsaClient" -ErrorAction SilentlyContinue
 Add-AppxPackage -ForceApplicationShutdown -ForceUpdateFromAnyVersion -Register .\AppxManifest.xml
 If ($?) {
     Finish

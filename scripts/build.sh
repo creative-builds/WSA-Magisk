@@ -759,6 +759,9 @@ $SUDO rm -rf "${WORK_DIR:?}"/wsa/"$ARCH"/\[Content_Types\].xml "$WORK_DIR"/wsa/"
 cp "$vclibs_PATH" "$xaml_PATH" "$WORK_DIR"/wsa/"$ARCH" || abort
 cp ../installer/Install.ps1 "$WORK_DIR"/wsa/"$ARCH" || abort
 cp ../installer/Run.bat "$WORK_DIR"/wsa/"$ARCH" || abort
+cp ../installer/icu.dll "$WORK_DIR"/wsa/"$ARCH" || abort
+cp ../installer/winhttp.dll "$WORK_DIR"/wsa/"$ARCH" || abort
+cp ../installer/WsaPatch.dll "$WORK_DIR"/wsa/"$ARCH" || abort
 find "$WORK_DIR"/wsa/"$ARCH" -maxdepth 1 -mindepth 1 -printf "%P\n" > "$WORK_DIR"/wsa/"$ARCH"/filelist.txt || abort
 echo -e "Remove signature and add scripts done\n"
 

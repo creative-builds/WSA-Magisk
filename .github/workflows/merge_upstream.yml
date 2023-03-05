@@ -23,6 +23,22 @@ jobs:
       - name: Merge changes from main
         run: |
           git pull https://github.com/LSPosed/MagiskOnWSALocal main --no-edit
+        
+      - name: Compare changes
+        id: compare
+        run: |
+          git diff --name-only HEAD origin/main
+          echo "changes=$(git diff --name-only HEAD origin/main)" >> $GITHUB_OUTPUT
+          
       - name: Push all changes
-        run: git push origin main
+        if: ${{ steps.compare.outputs.changes != '' }}
+        run: |
+          git push origin main
+
+      - name: Trigger build
+        uses: peter-evans/repository-dispatch@v1
+        if: ${{ steps.compare.outputs.changes != '' }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: build
         

@@ -36,7 +36,7 @@ jobs:
           git push origin main
 
       - name: Trigger build
-        uses: peter-evans/repository-dispatch@v1
+        uses: peter-evans/repository-dispatch@v2.1.1
         if: ${{ steps.compare.outputs.changes != '' }}
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

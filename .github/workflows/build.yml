@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  repository_dispatch:
+    types: [build]
 
 concurrency: 
   group: ${{ github.head_ref || github.ref }}

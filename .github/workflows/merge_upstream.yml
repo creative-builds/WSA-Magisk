@@ -13,6 +13,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          token: ${{ secrets.PAT }}
 
       - name: Setup git
         run: |
@@ -34,11 +35,3 @@ jobs:
         if: ${{ steps.compare.outputs.changes != '' }}
         run: |
           git push origin main
-
-      - name: Trigger build
-        uses: peter-evans/repository-dispatch@v2.1.1
-        if: ${{ steps.compare.outputs.changes != '' }}
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          event-type: build
-        

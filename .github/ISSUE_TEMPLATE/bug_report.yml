@@ -78,9 +78,12 @@ body:
       value: |
         <details>
         
+        [//]: <> (Don't modify above)
+        
         ```
         # Replace this line with the log
         ```
+        [//]: <> (Don't modify below)
         </details>
     validations:
       required: true

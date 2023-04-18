@@ -10,7 +10,7 @@ on:
         default: x64
       release-type:
         type: choice
-        description: Release type of WSA. RP means Release Preview, WIS means Insider Slow, WIF means Insider Fas
+        description: Release type of WSA. RP = Release Preview; WIS = Insider Slow; WIF = Insider Fast
         required: true
         options: ["retail","RP","WIS","WIF"]
         default: "retail"
@@ -47,7 +47,7 @@ on:
         type: choice
         description: Compress format.
         required: true
-        options: ["zip","7z","xz"]
+        options: ["zip","7z"]
         default: "7z"
 
 jobs:
@@ -62,7 +62,7 @@ jobs:
       - name: Install Dependencies 🧑‍🏭
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y whiptail lzip patchelf e2fsprogs python3-pip p7zip-full attr xz-utils qemu-utils unzip
+          sudo apt-get install -y whiptail lzip patchelf e2fsprogs python3-pip p7zip-full attr qemu-utils unzip sudo
           python3 -m pip install -r scripts/requirements.txt -q
 
       - name: Grant exec permission to script 👑

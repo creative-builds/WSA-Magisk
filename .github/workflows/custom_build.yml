@@ -62,7 +62,7 @@ jobs:
       - name: Install Dependencies 🧑‍🏭
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y whiptail lzip patchelf e2fsprogs python3-pip p7zip-full attr qemu-utils unzip sudo
+          sudo apt-get install -y whiptail lzip patchelf e2fsprogs python3-pip p7zip-full attr qemu-utils unzip sudo python3-venv
           python3 -m pip install -r scripts/requirements.txt -q
 
       - name: Grant exec permission to script 👑

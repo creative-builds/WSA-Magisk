@@ -35,7 +35,7 @@ body:
   - type: input
     attributes:
       label: MagiskOnWSALocal commit full SHA/MagiskOnWSALocal 
-      description:  Don't use 'latest'. Copy and paste full commit SHA, otherwise your issue will be closed. commit SHA，issue
+      description: Don't use 'latest'. Copy and paste full commit SHA, otherwise your issue will be closed. commit SHA，issue
     validations:
       required: true
   - type: textarea

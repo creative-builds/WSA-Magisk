@@ -42,7 +42,7 @@ jobs:
               python3 -m venv "$PYTHON_VENV_DIR"
           }
           source "$PYTHON_VENV_DIR"/bin/activate
-          python3 -c "import pkg_resources; pkg_resources.require(open('requirements.txt',mode='r'))" &>/dev/null || {
+          python3 -c "import pkg_resources; pkg_resources.require(open('scripts/requirements.txt',mode='r'))" &>/dev/null || {
               python3 -m pip install -r scripts/requirements.txt -q
           }
           deactivate

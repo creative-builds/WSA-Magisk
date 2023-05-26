@@ -31,19 +31,27 @@ jobs:
       - name: Install Dependencies
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: lzip patchelf e2fsprogs python3 python3-pip aria2 p7zip-full attr unzip sudo whiptail qemu-utils
+          packages: patchelf e2fsprogs python3 python3-pip aria2 p7zip-full attr unzip sudo whiptail qemu-utils
           version: 1.0
 
-      - name: Install venv & libraries for Python
+      - name: Install Lzip + Python venv & its libraries
         run: |
-          python3 -c "import venv" >/dev/null 2>&1 || if ! (sudo apt-get install "python3-venv"); then abort; fi
-          PYTHON_VENV_DIR="$(dirname "$PWD")/python3-env"
-          [ -f "$PYTHON_VENV_DIR/bin/activate" ] || {
-              python3 -m venv "$PYTHON_VENV_DIR"
+          wget -P ./download/ http://ftp.debian.org/debian/pool/main/l/lzip/lzip_1.23-5_amd64.deb
+          sudo dpkg -i ./download/lzip_1.23-5_amd64.deb
+          python3 -c "import venv" >/dev/null 2>&1 || {
+              if ! (sudo apt-get install "python3-venv"); then
+                  abort
+              fi
           }
-          source "$PYTHON_VENV_DIR"/bin/activate
+          echo "Creating python3 virtual env"
+          python3 -m venv --system-site-packages "$(dirname "$PWD")/python3-env" || {
+               echo "Failed to upgrade python3 virtual env, clear and recreate"
+               python3 -m venv --clear --system-site-packages "$(dirname "$PWD")/python3-env" || abort "Failed to create python3 virtual env"
+          }
+          source "$(dirname "$PWD")/python3-env/bin/activate" || abort "Failed to activate python3 virtual env"
           python3 -c "import pkg_resources; pkg_resources.require(open('scripts/requirements.txt',mode='r'))" &>/dev/null || {
-              python3 -m pip install -r scripts/requirements.txt -q
+               echo "Installing Python3 dependencies"
+               python3 -m pip install -r scripts/requirements.txt || abort "Failed to install python3 dependencies"
           }
           deactivate
 

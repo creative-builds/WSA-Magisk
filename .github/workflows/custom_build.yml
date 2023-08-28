@@ -4,13 +4,13 @@ on:
     inputs:
       arch:
         type: choice
-        description: Architecture of WSA.
+        description: Target CPU architecture of WSA.
         required: true
         options: [x64, arm64]
         default: x64
       release-type:
         type: choice
-        description: Release type of WSA. RP = Release Preview; WIS = Insider Slow; WIF = Insider Fast
+        description: Release type of WSA. RP=Release Preview; WIS=Insider Slow; WIF=Insider Fast
         required: true
         options: ["retail","RP","WIS","WIF"]
         default: "retail"
@@ -60,15 +60,13 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install Dependencies 🧑‍🏭
-        uses: awalsh128/cache-apt-pkgs-action@latest
+        uses: sn-o-w/cache-apt-pkgs-action@master
         with:
-          packages: patchelf e2fsprogs python3 python3-pip aria2 p7zip-full attr unzip sudo whiptail qemu-utils
+          packages: lzip patchelf e2fsprogs python3 python3-pip aria2 p7zip-full attr unzip sudo whiptail qemu-utils
           version: 1.0
 
-      - name: Install Lzip + Python venv & its libraries 🐍
+      - name: Install Python venv & its libraries 🐍
         run: |
-          wget -P ./download/ http://ftp.debian.org/debian/pool/main/l/lzip/lzip_1.23-5_amd64.deb
-          sudo dpkg -i ./download/lzip_1.23-5_amd64.deb
           python3 -c "import venv" >/dev/null 2>&1 || {
               if ! (sudo apt-get install "python3-venv"); then
                   abort

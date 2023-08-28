@@ -10,9 +10,9 @@ on:
         default: x64
       release-type:
         type: choice
-        description: Release type of WSA. RP=Release Preview; WIS=Insider Slow; WIF=Insider Fast
+        description: Release type of WSA. RP=Release Preview; WIS=Insider Slow; WIF=Insider Fast; WIP=Insider Preview
         required: true
-        options: ["retail","RP","WIS","WIF"]
+        options: ["retail","RP","WIS","WIF","WIP"]
         default: "retail"
       magisk-ver:
         type: choice
@@ -83,13 +83,22 @@ jobs:
                python3 -m pip install -r scripts/requirements.txt || abort "Failed to install python3 dependencies"
           }
           deactivate
+          if [[ "${{ inputs.release-type }}" == "WIP" ]]; then
+            mkdir -p ./download/ >/dev/null 2>&1
+            wget -O ./download/wsa-WIF.zip $(wget -cq -O - https://api.github.com/repos/MustardChef/WSAPackages/releases/latest | jq -r '.assets[] | .browser_download_url')
+          fi
 
       - name: Grant exec permission to script 👑
         run: chmod +x ./scripts/build.sh
 
       - name: Build WSA 🏗️
         id: wsa
-        run: ./scripts/build.sh --arch ${{ inputs.arch }} --release-type ${{ inputs.release-type }} --magisk-ver ${{ inputs.magisk-ver }} --gapps-brand ${{ inputs.gapps-brand }} --gapps-variant ${{ inputs.gapps-variant }} --root-sol ${{ inputs.root-sol }} --remove-amazon --compress-format ${{ inputs.compress-format }}
+        run: |
+          if [[ "${{ inputs.release-type }}" == "WIP" ]]; then
+            ./scripts/build.sh --arch ${{ inputs.arch }} --release-type WIF --magisk-ver ${{ inputs.magisk-ver }} --gapps-brand ${{ inputs.gapps-brand }} --gapps-variant ${{ inputs.gapps-variant }} --root-sol ${{ inputs.root-sol }} --remove-amazon --skip-download-wsa --compress-format ${{ inputs.compress-format }}
+          else
+            ./scripts/build.sh --arch ${{ inputs.arch }} --release-type ${{ inputs.release-type }} --magisk-ver ${{ inputs.magisk-ver }} --gapps-brand ${{ inputs.gapps-brand }} --gapps-variant ${{ inputs.gapps-variant }} --root-sol ${{ inputs.root-sol }} --remove-amazon --compress-format ${{ inputs.compress-format }}
+          fi
 
       - name: Upload Artifact 🤌
         uses: actions/upload-artifact@v3

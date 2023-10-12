@@ -85,7 +85,7 @@ jobs:
           deactivate
           if [[ "${{ inputs.release-type }}" == "PP" ]]; then
             mkdir -p ./download/ >/dev/null 2>&1
-            wget -O ./download/wsa-WIF.zip $(wget -cq -O - https://api.github.com/repos/MustardChef/WSAPackages/releases/latest | jq -r '.assets[] | .browser_download_url')
+            tag=$(wget -O - "https://api.github.com/repos/MustardChef/WSAPackages/tags" | jq -r '.[0].name'); wget -O ./download/wsa-WIF.zip "https://github.com/MustardChef/WSAPackages/releases/download/${tag}/MicrosoftCorporationII.WindowsSubsystemForAndroid_${tag#WSA_}_neutral_._8wekyb3d8bbwe.Msixbundle"
           fi
 
       - name: Grant exec permission to script 👑

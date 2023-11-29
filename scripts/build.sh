@@ -28,7 +28,7 @@ if [ "$HOST_ARCH" != "x86_64" ] && [ "$HOST_ARCH" != "aarch64" ]; then
     exit 1
 fi
 cd "$(dirname "$0")" || exit 1
-# export TMPDIR=$(dirname "$PWD")/WORK_DIR_
+# export TMPDIR=$HOME/.cache/wsa
 if [ "$TMPDIR" ] && [ ! -d "$TMPDIR" ]; then
     mkdir -p "$TMPDIR"
 fi
@@ -40,6 +40,13 @@ VENDOR_MNT_RO="$ROOT_MNT_RO/vendor"
 PRODUCT_MNT_RO="$ROOT_MNT_RO/product"
 SYSTEM_EXT_MNT_RO="$ROOT_MNT_RO/system_ext"
 
+# upperdir
+ROOT_MNT_RW="$WORK_DIR/upper"
+VENDOR_MNT_RW="$ROOT_MNT_RW/vendor"
+PRODUCT_MNT_RW="$ROOT_MNT_RW/product"
+SYSTEM_EXT_MNT_RW="$ROOT_MNT_RW/system_ext"
+SYSTEM_MNT_RW="$ROOT_MNT_RW/system"
+
 # merged
 ROOT_MNT="$WORK_DIR/system_root_merged"
 SYSTEM_MNT="$ROOT_MNT/system"
@@ -48,18 +55,23 @@ PRODUCT_MNT="$ROOT_MNT/product"
 SYSTEM_EXT_MNT="$ROOT_MNT/system_ext"
 
 declare -A LOWER_PARTITION=(["zsystem"]="$ROOT_MNT_RO" ["vendor"]="$VENDOR_MNT_RO" ["product"]="$PRODUCT_MNT_RO" ["system_ext"]="$SYSTEM_EXT_MNT_RO")
+declare -A UPPER_PARTITION=(["zsystem"]="$SYSTEM_MNT_RW" ["vendor"]="$VENDOR_MNT_RW" ["product"]="$PRODUCT_MNT_RW" ["system_ext"]="$SYSTEM_EXT_MNT_RW")
 declare -A MERGED_PARTITION=(["zsystem"]="$ROOT_MNT" ["vendor"]="$VENDOR_MNT" ["product"]="$PRODUCT_MNT" ["system_ext"]="$SYSTEM_EXT_MNT")
 DOWNLOAD_DIR=../download
 DOWNLOAD_CONF_NAME=download.list
 PYTHON_VENV_DIR="$(dirname "$PWD")/python3-env"
+EROFS_USE_FUSE=1
 umount_clean() {
     if [ -d "$ROOT_MNT" ] || [ -d "$ROOT_MNT_RO" ]; then
         echo "Cleanup Mount Directory"
         for PART in "${LOWER_PARTITION[@]}"; do
-            [ -d "$PART" ] && sudo umount -v "$PART"
+            sudo umount -v "$PART"
+        done
+        for PART in "${UPPER_PARTITION[@]}"; do
+            sudo rm -rf "${PART:?}"
         done
         for PART in "${MERGED_PARTITION[@]}"; do
-            [ -d "$PART" ] && sudo umount -v "$PART"
+            sudo umount -v "$PART"
         done
         sudo rm -rf "${WORK_DIR:?}"
     else
@@ -71,7 +83,7 @@ umount_clean() {
         unset TMPDIR
     fi
     rm -f "${DOWNLOAD_DIR:?}/$DOWNLOAD_CONF_NAME"
-    if [ "$(which python)" == "$PYTHON_VENV_DIR/bin/python" ]; then
+    if [ "$(python3 -c 'import sys ; print( 1 if sys.prefix != sys.base_prefix else 0 )')" = "1" ]; then
         echo "deactivate python3 venv"
         deactivate
     fi
@@ -146,27 +158,25 @@ vhdx_to_raw_img() {
     rm -f "$1" || return 1
 }
 
-mk_overlayfs() {
-    local lowerdir="$1"
-    local upperdir workdir merged context own
-    merged="$3"
-    case "$2" in
-        system)
-            upperdir="$WORK_DIR/upper/$2"
-            workdir="$WORK_DIR/worker/$2"
-            ;;
-        *)
-            upperdir="$WORK_DIR/upper/system/$2"
-            workdir="$WORK_DIR/worker/system/$2"
-            ;;
-    esac
-    echo "mk_overlayfs: label $2
+check_image_type() {
+    local type
+    type=$(blkid -o value -s TYPE "$1")
+    echo "$type"
+}
+
+mk_overlayfs() { # label lowerdir upperdir merged
+    local context own
+    local workdir="$WORK_DIR/worker/$1"
+    local lowerdir="$2"
+    local upperdir="$3"
+    local merged="$4"
+
+    echo "mk_overlayfs: label $1
         lowerdir=$lowerdir
         upperdir=$upperdir
         workdir=$workdir
         merged=$merged"
-    sudo mkdir -p -m 755 "$workdir" "$upperdir" "$merged"
-    case "$2" in
+    case "$1" in
         vendor)
             context="u:object_r:vendor_file:s0"
             own="0:2000"
@@ -180,18 +190,27 @@ mk_overlayfs() {
             own="0:0"
             ;;
     esac
-    sudo chown -R "$own" "$upperdir" "$workdir" "$merged"
-    sudo setfattr -n security.selinux -v "$context" "$upperdir"
-    sudo setfattr -n security.selinux -v "$context" "$workdir"
-    sudo setfattr -n security.selinux -v "$context" "$merged"
-    sudo mount -vt overlay overlay -ouserxattr,lowerdir="$lowerdir",upperdir="$upperdir",workdir="$workdir" "$merged"
+    sudo mkdir -p -m 755 "$workdir" "$upperdir" "$merged" || return 1
+    sudo chown -R "$own" "$upperdir" "$workdir" "$merged" || return 1
+    sudo setfattr -n security.selinux -v "$context" "$upperdir" || return 1
+    sudo setfattr -n security.selinux -v "$context" "$workdir" || return 1
+    sudo setfattr -n security.selinux -v "$context" "$merged" || return 1
+    sudo mount -vt overlay overlay -olowerdir="$lowerdir",upperdir="$upperdir",workdir="$workdir" "$merged" || return 1
 }
 
-mk_erofs_umount() {
-    sudo mkfs.erofs -zlz4hc -T1230768000 --chunksize=4096 --exclude-regex="lost+found" "$2".erofs "$1" || abort "Failed to make erofs image from $1"
+mk_image_umount() { # dir imgpath upperdir imgtype
+    echo "mk_image_umount: $*"
+    if [ "$4" = "erofs" ]; then
+        sudo "../bin/$HOST_ARCH/mkfs.erofs" -zlz4hc -T1230768000 --chunksize=4096 --exclude-regex="lost+found" "$2"."$4" "$1" || abort "Failed to make image for $1"
+    elif [ "$4" = "ext4" ]; then
+        abort "Not yet implemented"
+    fi
     sudo umount -v "$1"
     sudo rm -f "$2"
-    sudo mv "$2".erofs "$2"
+    sudo mv "$2"."$4" "$2"
+    if [ -d "$3" ]; then
+        sudo rm -rf "$3"
+    fi
 }
 
 ro_ext4_img_to_rw() {
@@ -201,11 +220,19 @@ ro_ext4_img_to_rw() {
     return 0
 }
 
+mount_erofs() {
+    if [ "$EROFS_USE_FUSE" ]; then
+        sudo "../bin/$HOST_ARCH/fuse.erofs" "$1" "$2" || return 1
+    else
+        sudo mount -v -t erofs -o ro,loop "$1" "$2" || return 1
+    fi
+}
+
 # workaround for Debian
 # In Debian /usr/sbin is not in PATH and some utilities in there are in use
 [ -d /usr/sbin ] && export PATH="/usr/sbin:$PATH"
 # In Debian /etc/mtab is not exist
-[ -f /etc/mtab ] || ln -s /proc/self/mounts /etc/mtab
+[ -f /etc/mtab ] || sudo ln -s /proc/self/mounts /etc/mtab
 
 ARCH_MAP=(
     "x64"
@@ -420,7 +447,7 @@ fi
 require_su() {
     if test "$(id -u)" != "0"; then
         if [ "$(sudo id -u)" != "0" ]; then
-            abort "ROOT/SUDO is required to run this script"
+            abort "sudo is required to run this script"
         fi
     fi
 }
@@ -461,15 +488,17 @@ update_gapps_zip_name() {
     fi
     GAPPS_PATH=$DOWNLOAD_DIR/$GAPPS_ZIP_NAME
 }
-WSA_MAIN_VER=0
+WSA_MAJOR_VER=0
 update_ksu_zip_name() {
-    KERNEL_VER="5.10.117.2"
-    if [ "$WSA_MAIN_VER" -ge "2303" ]; then
-        KERNEL_VER="5.15.78.1"
-    fi
-    if [ "$WSA_MAIN_VER" -ge "2304" ]; then
-        KERNEL_VER="5.15.94.1"
-    fi
+    KERNEL_VER=""
+    case "$WSA_MAJOR_VER" in
+      "2305") KERNEL_VER="5.15.94.2";;
+      "2306") KERNEL_VER="5.15.104.1";;
+      "2307") KERNEL_VER="5.15.104.2";;
+      "2308") KERNEL_VER="5.15.104.3";;
+      "2309") KERNEL_VER="5.15.104.4";;
+      *) abort "KernelSU is not supported in this WSA version: $WSA_MAJOR_VER"
+    esac
     KERNELSU_ZIP_NAME=kernelsu-$ARCH-$KERNEL_VER.zip
     KERNELSU_PATH=$DOWNLOAD_DIR/$KERNELSU_ZIP_NAME
     KERNELSU_INFO="$KERNELSU_PATH.info"
@@ -482,9 +511,11 @@ if [ -z ${OFFLINE+x} ]; then
         # shellcheck disable=SC1090
         source "$WSA_WORK_ENV" || abort
     else
-        WSA_MAIN_VER=$(python3 getWSAMainVersion.py "$ARCH" "$WSA_ZIP_PATH")
+        echo "Generate Download Links"
+        python3 generateWSALinks.py "$ARCH" "$RELEASE_TYPE" "$DOWNLOAD_DIR" "$DOWNLOAD_CONF_NAME" "$DOWN_WSA" || abort
+        WSA_MAJOR_VER=$(python3 getWSAMajorVersion.py "$ARCH" "$WSA_ZIP_PATH")
     fi
-    if [[ "$WSA_MAIN_VER" -lt 2211 ]]; then
+    if [[ "$WSA_MAJOR_VER" -lt 2211 ]]; then
         ANDROID_API=32
     fi
     if [ "$ROOT_SOL" = "magisk" ] || [ "$GAPPS_BRAND" != "none" ]; then
@@ -511,8 +542,8 @@ if [ -z ${OFFLINE+x} ]; then
         exit 1
     fi
 else # Offline mode
-    WSA_MAIN_VER=$(python3 getWSAMainVersion.py "$ARCH" "$WSA_ZIP_PATH")
-    if [[ "$WSA_MAIN_VER" -lt 2211 ]]; then
+    WSA_MAJOR_VER=$(python3 getWSAMajorVersion.py "$ARCH" "$WSA_ZIP_PATH")
+    if [[ "$WSA_MAJOR_VER" -lt 2211 ]]; then
         ANDROID_API=32
     fi
     declare -A FILES_CHECK_LIST=([WSA_ZIP_PATH]="$WSA_ZIP_PATH" [xaml_PATH]="$xaml_PATH" [vclibs_PATH]="$vclibs_PATH" [UWPVCLibs_PATH]="$UWPVCLibs_PATH")
@@ -609,7 +640,7 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
                 abort "Unzip OpenGApps failed, is the download incomplete?"
             fi
         else
-            if ! unzip "$GAPPS_PATH" "system/*" -x "system/addon.d/*" "system/system_ext/priv-app/SetupWizard/*" -d "$WORK_DIR/gapps"; then
+            if ! unzip "$GAPPS_PATH" "system/*" -x "system/addon.d/*" "system/product/priv-app/VelvetTitan/*" "system/system_ext/priv-app/SetupWizard/*" -d "$WORK_DIR/gapps"; then
                 CLEAN_DOWNLOAD_GAPPS=1
                 abort "Unzip MindTheGapps failed, package is corrupted?"
             fi
@@ -623,39 +654,40 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
     echo -e "Extract done\n"
 fi
 
-if [[ "$WSA_MAIN_VER" -ge 2302 ]]; then
+if [ -f "$WORK_DIR/wsa/$ARCH/system.vhdx" ]; then
+    VM_IMAGES_USE_VHDX=1
     echo "Convert vhdx to RAW image"
     vhdx_to_raw_img "$WORK_DIR/wsa/$ARCH/system_ext.vhdx" "$WORK_DIR/wsa/$ARCH/system_ext.img" || abort
     vhdx_to_raw_img "$WORK_DIR/wsa/$ARCH/product.vhdx" "$WORK_DIR/wsa/$ARCH/product.img" || abort
     vhdx_to_raw_img "$WORK_DIR/wsa/$ARCH/system.vhdx" "$WORK_DIR/wsa/$ARCH/system.img" || abort
     vhdx_to_raw_img "$WORK_DIR/wsa/$ARCH/vendor.vhdx" "$WORK_DIR/wsa/$ARCH/vendor.img" || abort
     echo -e "Convert vhdx to RAW image done\n"
-fi
-if [[ "$WSA_MAIN_VER" -ge 2304 ]]; then
+    SYSTEMIMAGES_FILE_SYSTEM_TYPE=$(check_image_type "$WORK_DIR/wsa/$ARCH/system.img")
     echo "Mount images"
     sudo mkdir -p -m 755 "$ROOT_MNT_RO" || abort
     sudo chown "0:0" "$ROOT_MNT_RO" || abort
     sudo setfattr -n security.selinux -v "u:object_r:rootfs:s0" "$ROOT_MNT_RO" || abort
-    sudo mount -v -t erofs -o loop "$WORK_DIR/wsa/$ARCH/system.img" "$ROOT_MNT_RO" || abort
-    sudo mount -v -t erofs -o loop "$WORK_DIR/wsa/$ARCH/vendor.img" "$VENDOR_MNT_RO" || abort
-    sudo mount -v -t erofs -o loop "$WORK_DIR/wsa/$ARCH/product.img" "$PRODUCT_MNT_RO" || abort
-    sudo mount -v -t erofs -o loop "$WORK_DIR/wsa/$ARCH/system_ext.img" "$SYSTEM_EXT_MNT_RO" || abort
+    if [ "$SYSTEMIMAGES_FILE_SYSTEM_TYPE" = "ext4" ]; then
+        sudo mount -vo loop,ro "$WORK_DIR/wsa/$ARCH/system.img" "$ROOT_MNT_RO" || abort
+        sudo mount -vo loop,ro "$WORK_DIR/wsa/$ARCH/vendor.img" "$VENDOR_MNT_RO" || abort
+        sudo mount -vo loop,ro "$WORK_DIR/wsa/$ARCH/product.img" "$PRODUCT_MNT_RO" || abort
+        sudo mount -vo loop,ro "$WORK_DIR/wsa/$ARCH/system_ext.img" "$SYSTEM_EXT_MNT_RO" || abort
+    elif [ "$SYSTEMIMAGES_FILE_SYSTEM_TYPE" = "erofs" ]; then
+        mount_erofs "$WORK_DIR/wsa/$ARCH/system.img" "$ROOT_MNT_RO" || abort
+        mount_erofs "$WORK_DIR/wsa/$ARCH/vendor.img" "$VENDOR_MNT_RO" || abort
+        mount_erofs "$WORK_DIR/wsa/$ARCH/product.img" "$PRODUCT_MNT_RO" || abort
+        mount_erofs "$WORK_DIR/wsa/$ARCH/system_ext.img" "$SYSTEM_EXT_MNT_RO" || abort
+    else
+        abort "Unknown file system type: $SYSTEMIMAGES_FILE_SYSTEM_TYPE"
+    fi
     echo -e "done\n"
-    echo "Create overlayfs for EROFS"
-    mk_overlayfs "$ROOT_MNT_RO" system "$ROOT_MNT" || abort 
-    mk_overlayfs "$VENDOR_MNT_RO" vendor "$VENDOR_MNT" || abort
-    mk_overlayfs "$PRODUCT_MNT_RO" product "$PRODUCT_MNT" || abort
-    mk_overlayfs "$SYSTEM_EXT_MNT_RO" system_ext "$SYSTEM_EXT_MNT" || abort
-    echo -e "Create overlayfs for EROFS done\n"
-elif [[ "$WSA_MAIN_VER" -ge 2302 ]]; then
-    echo "Remove read-only flag for read-only EXT4 image"
-    ro_ext4_img_to_rw "$WORK_DIR/wsa/$ARCH/system_ext.img" || abort
-    ro_ext4_img_to_rw "$WORK_DIR/wsa/$ARCH/product.img" || abort
-    ro_ext4_img_to_rw "$WORK_DIR/wsa/$ARCH/system.img" || abort
-    ro_ext4_img_to_rw "$WORK_DIR/wsa/$ARCH/vendor.img" || abort
-    echo -e "Remove read-only flag for read-only EXT4 image done\n"
-fi
-if [[ "$WSA_MAIN_VER" -lt 2304 ]]; then
+    echo "Create overlayfs"
+    mk_overlayfs system "$ROOT_MNT_RO" "$SYSTEM_MNT_RW" "$ROOT_MNT" || abort 
+    mk_overlayfs vendor "$VENDOR_MNT_RO" "$VENDOR_MNT_RW" "$VENDOR_MNT" || abort
+    mk_overlayfs product "$PRODUCT_MNT_RO" "$PRODUCT_MNT_RW" "$PRODUCT_MNT" || abort
+    mk_overlayfs system_ext "$SYSTEM_EXT_MNT_RO" "$SYSTEM_EXT_MNT_RW" "$SYSTEM_EXT_MNT" || abort
+    echo -e "Create overlayfs done\n"
+else
     echo "Calculate the required space"
     EXTRA_SIZE=10240
 
@@ -718,11 +750,12 @@ if [ "$REMOVE_AMAZON" ]; then
     find "${PRODUCT_MNT:?}"/{etc/permissions,etc/sysconfig,framework,priv-app} 2>/dev/null | grep -e amazon -e venezia | sudo xargs rm -rf
     find "${SYSTEM_EXT_MNT:?}"/{etc/*permissions,framework,priv-app} 2>/dev/null | grep -e amazon -e venezia | sudo xargs rm -rf
     rm -f "$WORK_DIR/wsa/$ARCH/apex/mado_release.apex"
+    find "${PRODUCT_MNT:?}"/{apex,etc/*permissions} 2>/dev/null | grep -e mado | sudo xargs rm -rf
     echo -e "done\n"
 fi
 
 echo "Add device administration features"
-sudo sed -i -e '/cts/a \ \ \ \ <feature name="android.software.device_admin" />' -e '/print/i \ \ \ \ <feature name="android.software.managed_users" />' "$VENDOR_MNT/etc/permissions/windows.permissions.xml"
+sudo sed -ie '/cts/a \    <feature name="android.software.device_admin" />' -e '/print/i \    <feature name="android.software.managed_users" />' "$VENDOR_MNT/etc/permissions/windows.permissions.xml"
 sudo setfattr -n security.selinux -v "u:object_r:vendor_configs_file:s0" "$VENDOR_MNT/etc/permissions/windows.permissions.xml" || abort
 echo -e "done\n"
 
@@ -761,17 +794,17 @@ on post-fs-data
     mount none none /dev/debug_ramdisk_mirror private
     mount tmpfs magisk /debug_ramdisk mode=0755
     copy /dev/debug_ramdisk_mirror/magisk64 /debug_ramdisk/magisk64
-    chmod 0711 /debug_ramdisk/magisk64
+    chmod 0755 /debug_ramdisk/magisk64
     symlink ./magisk64 /debug_ramdisk/magisk
     symlink ./magisk64 /debug_ramdisk/su
     symlink ./magisk64 /debug_ramdisk/resetprop
     start adbd
     copy /dev/debug_ramdisk_mirror/magisk32 /debug_ramdisk/magisk32
-    chmod 0711 /debug_ramdisk/magisk32
+    chmod 0755 /debug_ramdisk/magisk32
     copy /dev/debug_ramdisk_mirror/magiskinit /debug_ramdisk/magiskinit
-    chmod 0711 /debug_ramdisk/magiskinit
+    chmod 0750 /debug_ramdisk/magiskinit
     copy /dev/debug_ramdisk_mirror/magiskpolicy /debug_ramdisk/magiskpolicy
-    chmod 0711 /debug_ramdisk/magiskpolicy
+    chmod 0755 /debug_ramdisk/magiskpolicy
     mkdir /debug_ramdisk/.magisk
     mkdir /debug_ramdisk/.magisk/mirror 0
     mkdir /debug_ramdisk/.magisk/block 0
@@ -779,7 +812,7 @@ on post-fs-data
     copy /dev/debug_ramdisk_mirror/stub.apk /debug_ramdisk/stub.apk
     chmod 0644 /debug_ramdisk/stub.apk
     copy /dev/debug_ramdisk_mirror/loadpolicy.sh /debug_ramdisk/loadpolicy.sh
-    chmod 0711 /debug_ramdisk/loadpolicy.sh
+    chmod 0755 /debug_ramdisk/loadpolicy.sh
     umount /dev/debug_ramdisk_mirror
     rmdir /dev/debug_ramdisk_mirror
     exec u:r:magisk:s0 0 0 -- /system/bin/sh /debug_ramdisk/loadpolicy.sh
@@ -802,6 +835,7 @@ for i in "$NEW_INITRC_DIR"/*; do
     if [[ "$i" =~ init.zygote.+\.rc ]]; then
         echo "Inject zygote restart $i"
         sudo awk -i inplace '{if($0 ~ /service zygote /){print $0;print "    exec u:r:magisk:s0 0 0 -- /debug_ramdisk/magisk --zygote-restart";a="";next}} 1' "$i"
+        sudo setfattr -n security.selinux -v "u:object_r:system_file:s0" "$i" || abort
     fi
 done
 
@@ -825,10 +859,10 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
     echo "Integrate $GAPPS_BRAND"
     find "$WORK_DIR/gapps/" -mindepth 1 -type d -exec sudo chmod 0755 {} \;
     find "$WORK_DIR/gapps/" -mindepth 1 -type d -exec sudo chown root:root {} \;
-    file_list="$(find "$WORK_DIR/gapps/" -mindepth 1 -type f | cut -d/ -f5-)"
+    file_list="$(find "$WORK_DIR/gapps/" -mindepth 1 -type f)"
     for file in $file_list; do
-        sudo chown root:root "$WORK_DIR/gapps/${file}"
-        sudo chmod 0644 "$WORK_DIR/gapps/${file}"
+        sudo chown root:root "$file"
+        sudo chmod 0644 "$file"
     done
 
     if [ "$GAPPS_BRAND" = "OpenGApps" ]; then
@@ -841,7 +875,7 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
     fi
     sudo cp --preserve=all -r "$WORK_DIR/gapps/product/"* "$PRODUCT_MNT" || abort
 
-    find "$WORK_DIR/gapps/product/overlay" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/overlay/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:vendor_overlay_file:s0" {} \; || abort
+    find "$WORK_DIR/gapps/product/overlay" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/overlay/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/etc/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     find "$WORK_DIR/gapps/product/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/etc/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
 
@@ -855,6 +889,7 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
         find "$WORK_DIR/gapps/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/etc/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
         find "$WORK_DIR/gapps/etc/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$SYSTEM_MNT/etc/placeholder" -type f -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
     else
+        sudo setfattr -n security.selinux -v "u:object_r:system_file:s0" "$PRODUCT_MNT/framework" || abort
         find "$WORK_DIR/gapps/product/app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/app/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
         find "$WORK_DIR/gapps/product/priv-app/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/priv-app/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
         find "$WORK_DIR/gapps/product/framework/" -maxdepth 1 -mindepth 1 -printf '%P\n' | xargs -I placeholder sudo find "$PRODUCT_MNT/framework/placeholder" -type d -exec setfattr -n security.selinux -v "u:object_r:system_file:s0" {} \; || abort
@@ -886,19 +921,26 @@ if [ "$GAPPS_BRAND" != 'none' ]; then
     fi
 fi
 
-if [[ "$WSA_MAIN_VER" -ge 2304 ]]; then
-    echo "Create EROFS images"
-    mk_erofs_umount "$VENDOR_MNT" "$WORK_DIR/wsa/$ARCH/vendor.img" || abort
-    mk_erofs_umount "$PRODUCT_MNT" "$WORK_DIR/wsa/$ARCH/product.img" || abort
-    mk_erofs_umount "$SYSTEM_EXT_MNT" "$WORK_DIR/wsa/$ARCH/system_ext.img" || abort
-    mk_erofs_umount "$ROOT_MNT" "$WORK_DIR/wsa/$ARCH/system.img" || abort
-    echo -e "Create EROFS images done\n"
+if [ "$VM_IMAGES_USE_VHDX" ]; then
+    echo "Create system images"
+    mk_image_umount "$VENDOR_MNT" "$WORK_DIR/wsa/$ARCH/vendor.img" "$VENDOR_MNT_RW" "$SYSTEMIMAGES_FILE_SYSTEM_TYPE" || abort
+    mk_image_umount "$PRODUCT_MNT" "$WORK_DIR/wsa/$ARCH/product.img" "$PRODUCT_MNT_RW" "$SYSTEMIMAGES_FILE_SYSTEM_TYPE" || abort
+    mk_image_umount "$SYSTEM_EXT_MNT" "$WORK_DIR/wsa/$ARCH/system_ext.img" "$SYSTEM_EXT_MNT_RW" "$SYSTEMIMAGES_FILE_SYSTEM_TYPE" || abort
+    mk_image_umount "$ROOT_MNT" "$WORK_DIR/wsa/$ARCH/system.img" "$SYSTEM_MNT_RW" "$SYSTEMIMAGES_FILE_SYSTEM_TYPE" || abort
+    echo -e "Create system images done\n"
     echo "Umount images"
     sudo umount -v "$VENDOR_MNT_RO"
     sudo umount -v "$PRODUCT_MNT_RO"
     sudo umount -v "$SYSTEM_EXT_MNT_RO"
     sudo umount -v "$ROOT_MNT_RO"
     echo -e "done\n"
+    echo "Convert images to vhdx"
+    qemu-img convert -q -f raw -o subformat=fixed -O vhdx "$WORK_DIR/wsa/$ARCH/system_ext.img" "$WORK_DIR/wsa/$ARCH/system_ext.vhdx" || abort
+    qemu-img convert -q -f raw -o subformat=fixed -O vhdx "$WORK_DIR/wsa/$ARCH/product.img" "$WORK_DIR/wsa/$ARCH/product.vhdx" || abort
+    qemu-img convert -q -f raw -o subformat=fixed -O vhdx "$WORK_DIR/wsa/$ARCH/system.img" "$WORK_DIR/wsa/$ARCH/system.vhdx" || abort
+    qemu-img convert -q -f raw -o subformat=fixed -O vhdx "$WORK_DIR/wsa/$ARCH/vendor.img" "$WORK_DIR/wsa/$ARCH/vendor.vhdx" || abort
+    rm -f "$WORK_DIR/wsa/$ARCH/"*.img || abort
+    echo -e "Convert images to vhdx done\n"
 else
     echo "Umount images"
     sudo find "$ROOT_MNT" -exec touch -ht 200901010000.00 {} \;
@@ -913,16 +955,6 @@ else
     resize_img "$WORK_DIR/wsa/$ARCH/product.img" || abort
     resize_img "$WORK_DIR/wsa/$ARCH/system_ext.img" || abort
     echo -e "Shrink images done\n"
-fi
-
-if [[ "$WSA_MAIN_VER" -ge 2302 ]]; then
-    echo "Convert images to vhdx"
-    qemu-img convert -q -f raw -o subformat=fixed -O vhdx "$WORK_DIR/wsa/$ARCH/system_ext.img" "$WORK_DIR/wsa/$ARCH/system_ext.vhdx" || abort
-    qemu-img convert -q -f raw -o subformat=fixed -O vhdx "$WORK_DIR/wsa/$ARCH/product.img" "$WORK_DIR/wsa/$ARCH/product.vhdx" || abort
-    qemu-img convert -q -f raw -o subformat=fixed -O vhdx "$WORK_DIR/wsa/$ARCH/system.img" "$WORK_DIR/wsa/$ARCH/system.vhdx" || abort
-    qemu-img convert -q -f raw -o subformat=fixed -O vhdx "$WORK_DIR/wsa/$ARCH/vendor.img" "$WORK_DIR/wsa/$ARCH/vendor.vhdx" || abort
-    rm -f "$WORK_DIR/wsa/$ARCH/"*.img || abort
-    echo -e "Convert images to vhdx done\n"
 fi
 
 echo "Remove signature and add scripts"

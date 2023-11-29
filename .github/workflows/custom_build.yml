@@ -10,9 +10,9 @@ on:
         default: "x64"
       release-type:
         type: choice
-        description: Release type of WSA. RP=Release Preview; WIS=Insider Slow; WIF=Insider Fast
+        description: Release type of WSA. RP=Release Preview; WIS=Insider Slow; WIF=Insider Fast; PP=Preview Program
         required: true
-        options: ["retail","RP","WIS","WIF"]
+        options: ["retail","RP","WIS","WIF","PP"]
         default: "retail"
       gapps-brand:
         type: choice
@@ -83,13 +83,22 @@ jobs:
                python3 -m pip install -r scripts/requirements.txt || abort "Failed to install python3 dependencies"
           }
           deactivate
+          if [[ "${{ inputs.release-type }}" == "PP" ]]; then
+               mkdir -p ./download/ >/dev/null 2>&1
+               tag=$(wget -q -O - "https://api.github.com/repos/MustardChef/WSAPackages/tags" | jq -r '.[0].name'); wget --progress=bar:force:noscroll -O ./download/wsa-WIF.zip "https://github.com/MustardChef/WSAPackages/releases/download/${tag}/MicrosoftCorporationII.WindowsSubsystemForAndroid_${tag#WSA_}_neutral_._8wekyb3d8bbwe.Msixbundle"
+          fi
 
       - name: Grant exec permission to script 👑
         run: chmod +x ./scripts/build.sh
 
       - name: Build WSA 🏗️
         id: wsa
-        run: ./scripts/build.sh --arch ${{ inputs.arch }} --release-type ${{ inputs.release-type }} --gapps-brand ${{ inputs.gapps-brand }} --gapps-variant ${{ inputs.gapps-variant }} --root-sol ${{ inputs.root-sol }} --magisk-ver ${{ inputs.magisk-ver }} --remove-amazon --compress-format ${{ inputs.compress-format }}
+        run: |
+          if [[ "${{ inputs.release-type }}" == "PP" ]]; then
+            ./scripts/build.sh --arch ${{ inputs.arch }} --release-type WIF --gapps-brand ${{ inputs.gapps-brand }} --gapps-variant ${{ inputs.gapps-variant }} --root-sol ${{ inputs.root-sol }} --magisk-ver ${{ inputs.magisk-ver }} --remove-amazon --skip-download-wsa --compress-format ${{ inputs.compress-format }}
+          else
+            ./scripts/build.sh --arch ${{ inputs.arch }} --release-type ${{ inputs.release-type }} --gapps-brand ${{ inputs.gapps-brand }} --gapps-variant ${{ inputs.gapps-variant }} --root-sol ${{ inputs.root-sol }} --magisk-ver ${{ inputs.magisk-ver }} --remove-amazon --compress-format ${{ inputs.compress-format }}
+          fi
 
       - name: Upload Artifact 🤌
         uses: actions/upload-artifact@v3

@@ -21,7 +21,7 @@ jobs:
         arch: [x64, arm64]
         release: [retail]
         gapps: [MindTheGapps, none]
-        root: [magisk, none]
+        root: [magisk, kernelsu, none]
         magisk-ver: [stable]
         compress-format: [7z]
 

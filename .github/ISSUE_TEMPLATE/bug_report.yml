@@ -54,7 +54,7 @@ body:
       label: Build Parameters
       description: The script prints the build information each time you start a build. It looks like this, please copy and paste it.
       placeholder: |
-        COMMAND_LINE=--arch x64 --release-type retail --magisk-ver stable --gapps-brand MindTheGapps --gapps-variant pico  --root-sol magisk
+        COMMAND_LINE=--arch x64 --release-type retail --magisk-ver stable --gapps-brand MindTheGapps --gapps-variant pico --root-sol magisk
         INFO: Architecture: x64
         INFO: Release Type: retail
         INFO: Magisk Version: stable

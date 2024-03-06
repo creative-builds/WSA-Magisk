@@ -4,40 +4,34 @@ on:
     inputs:
       arch:
         type: choice
-        description: Architecture of WSA.
+        description: Target CPU architecture of WSA.
         required: true
-        options: [x64, arm64]
-        default: x64
+        options: ["x64","arm64"]
+        default: "x64"
       release-type:
         type: choice
-        description: Release type of WSA. RP = Release Preview; WIS = Insider Slow; WIF = Insider Fast
+        description: Release type of WSA. RP=Release Preview; WIS=Insider Slow; WIF=Insider Fast; PP=Preview Program
         required: true
-        options: ["retail","RP","WIS","WIF"]
+        options: ["retail","RP","WIS","WIF","PP"]
         default: "retail"
+      install-gapps:
+        type: choice
+        description: Choose if you want to include gapps or not.
+        required: true
+        options: ["yes","no"]
+        default: "yes"
+      root-sol:
+        type: choice
+        description: Root solution. none means no root.
+        required: true
+        options: ["magisk","kernelsu","none"]
+        default: "magisk"
       magisk-ver:
         type: choice
         description: Magisk version.
         required: true
         options: ["stable","beta","canary","debug"]
         default: "stable"
-      gapps-brand:
-        type: choice
-        description: GApps brand. none for no integration of GApps
-        required: true
-        options: ["OpenGApps","MindTheGapps","none"]
-        default: "MindTheGapps"
-      gapps-variant:
-        type: choice
-        description: GApps variant.
-        required: true
-        options: ["super","stock","full","mini","micro","nano","pico","tvstock","tvmini"]
-        default: "pico"
-      root-sol:
-        type: choice
-        description: Root solution. none means no root.
-        required: true
-        options: ["magisk","none"]
-        default: "magisk"
 #       remove-amazon:
 #         description: Remove Amazon Appstore from the system
 #         required: true
@@ -57,20 +51,56 @@ jobs:
 
     steps:
       - name: Checkout ♻️
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Dependencies 🧑‍🏭
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: python3 aria2 unzip sudo whiptail python3-venv python3-pip p7zip-full
+          version: 1.0
+
+      - name: Install Python venv & its libraries 🐍
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y whiptail lzip patchelf e2fsprogs python3-pip p7zip-full attr qemu-utils unzip sudo python3-venv
-          python3 -m pip install -r scripts/requirements.txt -q
+          python3 -c "import venv" >/dev/null 2>&1 || {
+              if ! (sudo apt-get install "python3-venv"); then
+                  abort
+              fi
+          }
+          echo "Creating python3 virtual env"
+          python3 -m venv --system-site-packages "$(dirname "$PWD")/python3-env" || {
+               echo "Failed to upgrade python3 virtual env, clear and recreate"
+               python3 -m venv --clear --system-site-packages "$(dirname "$PWD")/python3-env" || abort "Failed to create python3 virtual env"
+          }
+          source "$(dirname "$PWD")/python3-env/bin/activate" || abort "Failed to activate python3 virtual env"
+          python3 -c "import pkg_resources; pkg_resources.require(open('scripts/requirements.txt',mode='r'))" &>/dev/null || {
+               echo "Installing Python3 dependencies"
+               python3 -m pip install -r scripts/requirements.txt || abort "Failed to install python3 dependencies"
+          }
+          deactivate
+          if [[ "${{ inputs.release-type }}" == "PP" ]]; then
+               mkdir -p ./download/ >/dev/null 2>&1
+               tag=$(wget -q -O - "https://api.github.com/repos/bubbles-wow/WSA-Archive/tags" | jq -r '.[0].name'); wget --progress=bar:force:noscroll -O ./download/wsa-WIF.zip "https://github.com/bubbles-wow/WSA-Archive/releases/download/${tag}/MicrosoftCorporationII.WindowsSubsystemForAndroid_${tag}_neutral_._8wekyb3d8bbwe.Msixbundle"
+          fi
 
       - name: Grant exec permission to script 👑
         run: chmod +x ./scripts/build.sh
 
       - name: Build WSA 🏗️
         id: wsa
-        run: ./scripts/build.sh --arch ${{ inputs.arch }} --release-type ${{ inputs.release-type }} --magisk-ver ${{ inputs.magisk-ver }} --gapps-brand ${{ inputs.gapps-brand }} --gapps-variant ${{ inputs.gapps-variant }} --root-sol ${{ inputs.root-sol }} --remove-amazon --compress-format ${{ inputs.compress-format }}
+        run: |
+          if [[ "${{ inputs.release-type }}" == "PP" ]]; then
+            if [[ "${{ inputs.root-sol }}" == "kernelsu" ]]; then
+               ./scripts/build.sh --arch ${{ inputs.arch }} --release-type WIF --root-sol ${{ inputs.root-sol }} --magisk-ver ${{ inputs.magisk-ver }} --remove-amazon --skip-download-wsa --compress-format ${{ inputs.compress-format }}
+            else
+               ./scripts/build.sh --arch ${{ inputs.arch }} --release-type WIF --install-gapps --root-sol ${{ inputs.root-sol }} --magisk-ver ${{ inputs.magisk-ver }} --remove-amazon --skip-download-wsa --compress-format ${{ inputs.compress-format }}
+            fi
+          else
+            if [[ "${{ inputs.root-sol }}" == "kernelsu" ]]; then
+               ./scripts/build.sh --arch ${{ inputs.arch }} --release-type ${{ inputs.release-type }} --root-sol ${{ inputs.root-sol }} --magisk-ver ${{ inputs.magisk-ver }} --remove-amazon --compress-format ${{ inputs.compress-format }}
+            else
+               ./scripts/build.sh --arch ${{ inputs.arch }} --release-type ${{ inputs.release-type }} --install-gapps --root-sol ${{ inputs.root-sol }} --magisk-ver ${{ inputs.magisk-ver }} --remove-amazon --compress-format ${{ inputs.compress-format }}
+            fi
+          fi
 
       - name: Upload Artifact 🤌
         uses: actions/upload-artifact@v3

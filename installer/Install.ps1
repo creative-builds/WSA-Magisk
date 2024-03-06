@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with MagiskOnWSALocal.  If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (C) 2023 LSPosed Contributors
+# Copyright (C) 2024 LSPosed Contributors
 #
 
 $Host.UI.RawUI.WindowTitle = "Installing MagiskOnWSA...."
@@ -47,12 +47,7 @@ Function Test-CommandExist {
     Finally { $ErrorActionPreference = $OldPreference }
 } #end function Test-CommandExist
 
-function Finish {
-    Clear-Host
-    If (Test-CommandExist Optimize-VHD) {
-        Write-Output "Optimizing VHDX size...."
-        Optimize-VHD ".\*.vhdx" -Mode Full
-    }
+Function Finish {
     Clear-Host
     Start-Process "wsa://com.topjohnwu.magisk"
     Start-Process "wsa://com.android.vending"

@@ -15,11 +15,9 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with MagiskOnWSALocal.  If not, see <https://www.gnu.org/licenses/>.
 #
-# Copyright (C) 2023 LSPosed Contributors
+# Copyright (C) 2024 LSPosed Contributors
 #
 
-# DEBUG=--debug
-# CUSTOM_MAGISK=--magisk-custom
 if [ ! "$BASH_VERSION" ]; then
     echo "Please do not use sh to run this script, just execute it directly" 1>&2
     exit 1
@@ -41,8 +39,12 @@ function Radiolist {
 
 function YesNoBox {
     declare -A o="$1"
+    local default
+    [ "$2" ] && {
+        [ "$2" = "no" ] && default="--defaultno"
+    }
     shift
-    $DIALOG --title "${o[title]}" --yesno "${o[text]}" 0 0
+    $DIALOG --title "${o[title]}" $default --yesno "${o[text]}" 0 0
 }
 
 function DialogBox {
@@ -74,7 +76,8 @@ RELEASE_TYPE=$(
         'insider slow' "Beta Channel" 'off' \
         'insider fast' "Dev Channel" 'off'
 )
-
+declare -A RELEASE_TYPE_MAP=(["retail"]="retail" ["release preview"]="RP" ["insider slow"]="WIS" ["insider fast"]="WIF")
+COMMAND_LINE=(--arch "$ARCH" --release-type "${RELEASE_TYPE_MAP[$RELEASE_TYPE]}")
 if (YesNoBox '([title]="Root" [text]="Do you want to Root WSA?")'); then
     ROOT_SOL=$(
         Radiolist '([title]="Root solution"
@@ -82,8 +85,7 @@ if (YesNoBox '([title]="Root" [text]="Do you want to Root WSA?")'); then
             'magisk' "Magisk" 'on' \
             'kernelsu' "KernelSU" 'off'
     )
-else
-    ROOT_SOL="none"
+    COMMAND_LINE+=(--root-sol "$ROOT_SOL")
 fi
 
 if [ "$ROOT_SOL" = "magisk" ]; then
@@ -95,86 +97,27 @@ if [ "$ROOT_SOL" = "magisk" ]; then
             'canary' "Canary Channel" 'off' \
             'debug' "Canary Channel Debug Build" 'off'
     )
-else
-    MAGISK_VER=""
-fi
-
-if (YesNoBox '([title]="Install GApps" [text]="Do you want to install GApps?")'); then
-    GAPPS_BRAND=$(
-        Radiolist '([title]="Which GApps do you want to install?"
-                    [default]="MindTheGapps")' \
-            'MindTheGapps' "Recommend" 'on' \
-            'OpenGApps' "This flavor may cause startup failure" 'off'
-    )
-else
-    GAPPS_BRAND="none"
-fi
-
-if [ "$GAPPS_BRAND" = "OpenGApps" ]; then
-    # TODO: Keep it pico since other variants of opengapps are unable to boot successfully
-    if [ "$DEBUG" = "1" ]; then
-        GAPPS_VARIANT=$(
-            Radiolist '([title]="Variants of GApps"
-                        [default]="pico")' \
-                'super' "" 'off' \
-                'stock' "" 'off' \
-                'full' "" 'off' \
-                'mini' "" 'off' \
-                'micro' "" 'off' \
-                'nano' "" 'off' \
-                'pico' "" 'on' \
-                'tvstock' "" 'off' \
-                'tvmini' "" 'off'
-        )
-    else
-        GAPPS_VARIANT=""
+    COMMAND_LINE+=(--magisk-ver "$MAGISK_VER")
+    if (YesNoBox '([title]="Install GApps" [text]="Do you want to install GApps?")'); then
+        COMMAND_LINE+=(--install-gapps)
     fi
-else
-    GAPPS_VARIANT=""
 fi
 
-if (YesNoBox '([title]="Remove Amazon Appstore" [text]="Do you want to keep Amazon Appstore?")'); then
-    REMOVE_AMAZON=""
-else
-    REMOVE_AMAZON="--remove-amazon"
+if (YesNoBox '([title]="Remove Amazon Appstore" [text]="Do you want to remove Amazon Appstore?")' no); then
+    COMMAND_LINE+=(--remove-amazon)
 fi
 
 if (YesNoBox '([title]="Compress output" [text]="Do you want to compress the output?")'); then
-    COMPRESS_OUTPUT="--compress"
-else
-    COMPRESS_OUTPUT=""
-fi
-if [ "$COMPRESS_OUTPUT" = "--compress" ]; then
     COMPRESS_FORMAT=$(
         Radiolist '([title]="Compress format"
                     [default]="7z")' \
             '7z' "7-Zip" 'on' \
             'zip' "Zip" 'off'
     )
-fi
-
-clear
-declare -A RELEASE_TYPE_MAP=(["retail"]="retail" ["release preview"]="RP" ["insider slow"]="WIS" ["insider fast"]="WIF")
-COMMAND_LINE=(--arch "$ARCH" --release-type "${RELEASE_TYPE_MAP[$RELEASE_TYPE]}" --root-sol "$ROOT_SOL" --gapps-brand "$GAPPS_BRAND")
-CHECK_NULL_LIST=("$REMOVE_AMAZON" "$COMPRESS_OUTPUT" "$OFFLINE" "$DEBUG" "$CUSTOM_MAGISK")
-for i in "${CHECK_NULL_LIST[@]}"; do
-    if [ -n "$i" ]; then
-        COMMAND_LINE+=("$i")
-    fi
-done
-
-if [ -n "$MAGISK_VER" ]; then
-    COMMAND_LINE+=(--magisk-ver "$MAGISK_VER")
-fi
-
-if [ -n "$GAPPS_VARIANT" ]; then
-    COMMAND_LINE+=(--gapps-variant "$GAPPS_VARIANT")
-fi
-
-if [ -n "$COMPRESS_FORMAT" ]; then
     COMMAND_LINE+=(--compress-format "$COMPRESS_FORMAT")
 fi
 
+clear
 echo "COMMAND_LINE=${COMMAND_LINE[*]}"
 chmod +x ./build.sh
 ./build.sh "${COMMAND_LINE[@]}"
